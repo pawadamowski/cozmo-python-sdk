@@ -590,70 +590,135 @@ class World(event.Dispatcher):
         await self.wait_for(_clad._MsgRobotDeletedAllCustomObjects)
         # TODO: reset local object stte
 
-    async def _define_custom_object(self, object_type, x_size_mm, y_size_mm, z_size_mm,
-                                   marker_width_mm=25, marker_height_mm=25):
+    async def define_custom_box(self, custom_object_type,
+                                marker_front, marker_back,
+                                marker_top, marker_bottom,
+                                marker_left, marker_right,
+                                x_size_mm, y_size_mm, z_size_mm,
+                                marker_width_mm, marker_height_mm,
+                                is_unique=True):
         '''Defines a cuboid of custom size and binds it to a specific custom object type.
 
         Warning: This function is currently experimental and has several known issues.
-        1) There seems to be an off by 10x issue related to how the vision reports the object's
-        size and position.
-        2) The ID returned for these objects is not consistent.
-        3) Poor performance and other issues have been seen in the App when using this.
-        We plan to expand and improve upon it in a future release before making
-        it fully public and documented.
+        1) The ID returned for these objects is not consistent.
 
         The engine will now detect the markers associated with this object and send an
         object_observed message when they are seen. The markers must be placed in the center
         of their respective sides.
 
         Args:
-            object_type (:class:`cozmo.objects.CustomObjectTypes`): the object
-                type you are binding this custom object to
+            custom_object_type (:class:`cozmo.objects.CustomObjectTypes`): the
+                object type you are binding this custom object to
+            marker_front (:class:`cozmo.objects.CustomObjectMarkers`): the marker
+                affixed to the front of the object
+            marker_back: (:class:`cozmo.objects.CustomObjectMarkers`): the marker
+                affixed to the back of the object
+            marker_top: (:class:`cozmo.objects.CustomObjectMarkers`): the marker
+                affixed to the top of the object
+            marker_bottom: (:class:`cozmo.objects.CustomObjectMarkers`): the marker
+                affixed to the bottom of the object
+            marker_left: (:class:`cozmo.objects.CustomObjectMarkers`): the marker
+                affixed to the left of the object
+            marker_right: (:class:`cozmo.objects.CustomObjectMarkers`): the marker
+                affixed to the right of the object
             x_size_mm (float): size of the object (in millimeters) in the x axis.
             y_size_mm (float): size of the object (in millimeters) in the y axis.
             z_size_mm (float): size of the object (in millimeters) in the z axis.
             marker_width_mm (float): width of the printed marker (in millimeters).
             maker_height_mm (float): height of the printed marker (in millimeters).
+            is_unique (bool): can the engine assume there is only 1 of this object
+                (and therefore only 1 of each of any of these markers) in the world.
 
         Returns:
             A :class:`cozmo.object.CustomObject` instance with the specified dimensions.
                 This is not included in the world until it has been seen.
-
-        Star Image:
-
-        .. image:: ../images/star5.png
-
-        Arrow Image:
-
-        .. image:: ../images/arrow.png
-
-        The markers must be placed in the same order as listed below:
-
-        Custom_STAR5_Box:
-            * Front - Star5
-            * Back - Arrow
-
-        Custom_STAR5_Cube:
-            * All 6 faces - Star5
-
-        Custom_ARROW_Box:
-            * Front - Arrow
-            * Back - Star5
-
-        Custom_ARROW_Cube:
-            * All 6 faces - Arrow
         '''
-        # TODO make diagram for above docs!
-        if not isinstance(object_type, objects._CustomObjectType):
+        if not isinstance(custom_object_type, objects._CustomObjectType):
             raise TypeError("Unsupported object_type, requires CustomObjectType")
-        custom_object_base = self.custom_object_factory(object_type,
+
+        if is_unique:
+            # verify all 6 markers are unique
+            markers = set([marker_front, marker_back, marker_top, marker_bottom, marker_left, marker_right])
+            if len(markers) != 6:
+                raise ValueError("all markers must be unique for a unique object")
+
+        custom_object_base = self.custom_object_factory(self.conn, self, custom_object_type,
                                                         x_size_mm, y_size_mm, z_size_mm,
                                                         marker_width_mm, marker_height_mm,
-                                                        self.conn, self, dispatch_parent=self)
-        self.custom_objects[object_type.id] = custom_object_base
-        msg = _clad_to_engine_iface.DefineCustomObject(objectType=object_type.id,
-                                                       xSize_mm=x_size_mm, ySize_mm=y_size_mm, zSize_mm=z_size_mm,
-                                                       markerWidth_mm=marker_width_mm, markerHeight_mm=marker_height_mm)
+                                                        dispatch_parent=self)
+        self.custom_objects[custom_object_type.id] = custom_object_base
+        msg = _clad_to_engine_iface.DefineCustomBox(customType=custom_object_type.id,
+                                                    markerFront=marker_front.id,
+                                                    markerBack=marker_back.id,
+                                                    markerTop=marker_top.id,
+                                                    markerBottom=marker_bottom.id,
+                                                    markerLeft=marker_left.id,
+                                                    markerRight=marker_right.id,
+                                                    xSize_mm=x_size_mm,
+                                                    ySize_mm=y_size_mm,
+                                                    zSize_mm=z_size_mm,
+                                                    markerWidth_mm=marker_width_mm,
+                                                    markerHeight_mm=marker_height_mm,
+                                                    isUnique=is_unique)
+
+        self.conn.send_msg(msg)
+        await self.wait_for(_clad._MsgDefinedCustomObject)
+        return custom_object_base
+
+    async def define_custom_cube(self, custom_object_type,
+                                 marker,
+                                 size_mm,
+                                 marker_width_mm, marker_height_mm,
+                                 is_unique=True):
+        # TODO: Add docstring
+        if not isinstance(custom_object_type, objects._CustomObjectType):
+            raise TypeError("Unsupported object_type, requires CustomObjectType")
+
+        custom_object_base = self.custom_object_factory(self.conn, self, custom_object_type,
+                                                        size_mm, size_mm, size_mm,
+                                                        marker_width_mm, marker_height_mm,
+                                                        dispatch_parent=self)
+        self.custom_objects[custom_object_type.id] = custom_object_base
+
+        msg = _clad_to_engine_iface.DefineCustomCube(customType=custom_object_type.id,
+                                                     marker=marker.id,
+                                                     size_mm=size_mm,
+                                                     markerWidth_mm=marker_width_mm,
+                                                     markerHeight_mm=marker_height_mm,
+                                                     isUnique=is_unique)
+
+        self.conn.send_msg(msg)
+        await self.wait_for(_clad._MsgDefinedCustomObject)
+        return custom_object_base
+
+
+    async def define_custom_wall(self, custom_object_type,
+                                 marker,
+                                 width_mm, height_mm,
+                                 marker_width_mm, marker_height_mm,
+                                 is_unique=True):
+        # TODO: Add docstring
+
+        if not isinstance(custom_object_type, objects._CustomObjectType):
+            raise TypeError("Unsupported object_type, requires CustomObjectType")
+
+        # TODO: share this hardcoded constant from engine
+        wall_thickness_mm = 10.0
+
+        custom_object_base = self.custom_object_factory(self.conn, self, custom_object_type,
+                                                        wall_thickness_mm, width_mm, height_mm,
+                                                        marker_width_mm, marker_height_mm,
+                                                        dispatch_parent=self)
+        self.custom_objects[custom_object_type.id] = custom_object_base
+
+        msg = _clad_to_engine_iface.DefineCustomWall(customType=custom_object_type.id,
+                                                     marker=marker.id,
+                                                     width_mm=width_mm,
+                                                     height_mm=height_mm,
+                                                     markerWidth_mm=marker_width_mm,
+                                                     markerHeight_mm=marker_height_mm,
+                                                     isUnique=is_unique)
+
         self.conn.send_msg(msg)
         await self.wait_for(_clad._MsgDefinedCustomObject)
         return custom_object_base
